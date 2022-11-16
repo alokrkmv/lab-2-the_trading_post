@@ -7,6 +7,7 @@ import time
 import json
 import copy
 from database import DbHandler
+from LamportClock import LamportClock
 
 from datetime import datetime
 
@@ -49,6 +50,8 @@ class Peer(Process):
         self.heartbeat_counter = 0
         self.heatbeat_lock = Lock()
         self.smallest_buyer = "buyer0"
+        self.clock = LamportClock()
+        self.clock_lock = Lock()
         
 
     def __str__(self):
@@ -212,6 +215,26 @@ class Peer(Process):
                 self.executor.submit(self.begin_trading)
         except Exception as e:
             print(f"Something went wrong with error {e}")
+    # broadcast_lamport_clock : This method broadcasts a peer's clock to all the peers.
+    def broadcast_lamport_clock(self):
+        for neighbor in self.neighbors:
+            neighbor_proxy = self.get_uri_from_id(neighbor)
+            self.executor.submit(neighbor_proxy.adjust_buyer_clock, self.clock.value)
+            
+    
+    # adjust_buyer_clock: Upon receiving this message, a peer adjusts its clock, 
+    # only buyer and seller adjust there clock, but not the trader.
+    # Trader adjust their clock when lookup 
+    @Pyro4.expose
+    def adjust_buyer_clock(self, sender_clock):
+        # print("Lamport clock adjusted")
+        try:
+            if self.role == "buyer" : 
+                self.clock_lock.acquire()
+                self.clock.adjust(sender_clock) 
+                self.clock_lock.release()
+        except Exception as e:
+            print(f"Something went wrong while trying to adjust buyer's clock with error {e}")
 
     @Pyro4.expose
     def begin_trading(self):
@@ -259,8 +282,8 @@ class Peer(Process):
             print(f"Something went wrong while starting to trade for {self.id} with error {e}")
     
     @Pyro4.expose              
-    def add_to_trading_queue(self, buyer_id, item):
-        self.trading_queue.append((item, buyer_id))
+    def add_to_trading_queue(self, buyer_id, item, current_clock):
+        self.trading_queue.append((item, buyer_id, current_clock))
      
 
 
@@ -285,7 +308,13 @@ class Peer(Process):
                         print("Current leader is dead!!! Start re-election")
                         self.elect_leader()
                         break
-                self.executor.submit(trader.add_to_trading_queue, self.id, self.item)
+                self.clock_lock.acquire()
+                
+                current_clock = self.clock.value
+                # self.executor.submit(self.broadcast_lamport_clock)
+                print("REached here!!!")
+              
+                self.executor.submit(trader.add_to_trading_queue, self.id, self.item, current_clock)
                 time.sleep(10)
                 
                 self.item = self.items[random.randint(0, len(self.items) - 1)]
@@ -310,7 +339,6 @@ class Peer(Process):
             if self.election_flag:
                 
                 break
-
             try:
                 if len(self.trading_queue)>0:
                     # Write all the pending transactions to the disk
@@ -325,10 +353,26 @@ class Peer(Process):
                     except Exception as e:
                         print("Something went wrong while trying to write pending transactions to disk with error {e}")
          
+                    # Find the item in the queue with least clock value and serve it 
+                    mini = float("inf")
+                    min_index = None
+                    item, buyer_id , clock= self.trading_queue.pop(0)
                     
-                    item, buyer_id = self.trading_queue.pop(0)
+                    # try:
+                    #     for i, item_tuple in enumerate(self.trading_queue):
+                    #         print(item_tuple)
+                    #         item, buyer_id, clock = item_tuple
+                    #         if clock<mini:
+                    #             min_index = i
+                    #             mini = clock
+                    #     item, buyer_id , clock= self.trading_queue.pop(min_index)
+                    # except Exception as e:
+                    #     print(f"Something went wrong while trying to fetch data from trading queue {e}")
+                    # Trader will adjust it's clock when ever a request comes to it
+                 
+                    # self.clock.adjust(clock) 
                     
-                    print(f"Trader got a purchase request for item {item} from {buyer_id}")
+                    print(f"Trader got a purchase request for item {item} from {buyer_id} with clock {clock}")
                     data = self.db.find_seller_by_item(item)
                    
                     
