@@ -41,6 +41,7 @@ sudo apt-get install python3-tk````
 
 
 1  ![design_doc](https://github.com/alokrkmv/lab-2-the_trading_post/blob/main/src/Documentation/the_trading_post_doumentation.pdf)
+2. ![problem statement](https://github.com/alokrkmv/lab-2-the_trading_post/blob/main/src/Documentation/Lab%202_problem_statement.pdf)
 
     
   
